@@ -1,10 +1,10 @@
 import { Players, ReplicatedStorage, UserInputService } from "@rbxts/services";
 
-const FOLDER_NAME: string = "SISIGNALS";
-const LINK_NAME: string = "LINK";
+const FOLDER_NAME: string = "SIMPLESIGNALS";
+const LINK_NAME: string = "INPUT";
 
 export type KEYBINDS_REGISTRY = Map<Enum.KeyCode | Enum.UserInputType, string>;
-export type RESPONSE_REGISTRY = Map<string, () => void>;
+export type RESPONSE_REGISTRY = Map<string, (player: Player) => void>;
 
 class SimpleInput {
 	Signals = ReplicatedStorage.FindFirstChild(FOLDER_NAME) || new Instance("Folder", ReplicatedStorage);
@@ -18,7 +18,7 @@ class SimpleInput {
 	Client = {
 		Keybinds: this.DefaultBinds || (new Map() as KEYBINDS_REGISTRY),
 		Responses: new Map() as RESPONSE_REGISTRY,
-		Listen: () => {
+		Listen: (player: Player) => {
 			// User input
 			const connection = UserInputService.InputBegan.Connect((input: InputObject, gameProcess: boolean) => {
 				if (gameProcess) return;
@@ -29,7 +29,7 @@ class SimpleInput {
 					this.Link.FireServer(key);
 					const callback = this.Client.Responses.get(key.lower());
 					if (callback) {
-						callback();
+						callback(player);
 					} else warn(`${key} callback was not found but is a registered bind.`);
 				}
 			});
@@ -59,7 +59,7 @@ class SimpleInput {
 				if (typeIs(key, "string")) {
 					const response = this.Server.Responses.get(key.lower());
 					if (response) {
-						response();
+						response(player);
 					} else warn(`${key} callback was not found but is a registered bind.`);
 				} else warn("server: key is not a string");
 			});
