@@ -39,8 +39,8 @@ class SimpleInput {
 			});
 		},
 
-		SetClientBinds: (Binds: KEYBINDS_REGISTRY) => {
-			Binds.forEach((v, k) => {
+		SetClientBinds: (sentBinds: KEYBINDS_REGISTRY) => {
+			sentBinds.forEach((v, k) => {
 				this.Client.Keybinds.set(k, v.lower());
 			});
 		},
@@ -65,11 +65,13 @@ class SimpleInput {
 			});
 		},
 
-		SetDefaultBinds: (Binds: KEYBINDS_REGISTRY) => {
-			this.DefaultBinds = Binds;
+		SetDefaultBinds: (sentBinds: Map<Enum.KeyCode | Enum.UserInputType, string>) => {
+			sentBinds.forEach((v, k) => {
+				this.Client.Keybinds.set(k, v.lower());
+			});
 		},
 
-		SetServerResponses: (sentReponses: RESPONSE_REGISTRY) => {
+		SetServerResponses: (sentReponses: Map<string, (player: Player) => void>) => {
 			sentReponses.forEach((v, k) => {
 				this.Server.Responses.set(k.lower(), v);
 			});
