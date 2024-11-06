@@ -1,82 +1,67 @@
-import { Players, ReplicatedStorage, UserInputService } from "@rbxts/services";
+import { ContextActionService, ReplicatedStorage, RunService } from "@rbxts/services";
 
-const FOLDER_NAME: string = "SIMPLESIGNALS";
-const LINK_NAME: string = "INPUT";
+type ActionType = {
+	Name: string;
+	Gesture: Enum.KeyCode | Enum.UserInputType;
+	Client: () => void;
+	Server: (player: Player) => void;
+	TouchButton?: boolean;
+};
 
-export type KEYBINDS_REGISTRY = Map<Enum.KeyCode | Enum.UserInputType, string>;
-export type RESPONSE_REGISTRY = Map<string, (player: Player) => void>;
+const ACTION_FOLDER_NAME = "Actions";
+const LINK_NAME = "ActionLink";
 
-class SimpleInput {
-	Signals = ReplicatedStorage.FindFirstChild(FOLDER_NAME) || new Instance("Folder", ReplicatedStorage);
-	Link = (this.Signals.FindFirstChild(LINK_NAME) as RemoteEvent) || new Instance("RemoteEvent", this.Signals);
-	DefaultBinds = new Map() as KEYBINDS_REGISTRY;
+class SimpleAction {
+	private actions: Map<string, ActionType> = new Map();
+	private link: RemoteEvent | undefined;
+
 	constructor() {
-		this.Signals.Name = FOLDER_NAME;
-		this.Link.Name = LINK_NAME;
+		this.loadInputs();
 	}
 
-	Client = {
-		Keybinds: this.DefaultBinds || (new Map() as KEYBINDS_REGISTRY),
-		Responses: new Map() as RESPONSE_REGISTRY,
-		Listen: (player: Player) => {
-			// User input
-			const connection = UserInputService.InputBegan.Connect((input: InputObject, gameProcess: boolean) => {
-				if (gameProcess) return;
+	private loadInputs() {
+		const actionFolder = ReplicatedStorage.FindFirstChild(ACTION_FOLDER_NAME, true);
+		if (!actionFolder) {
+			error(`No folder named "${ACTION_FOLDER_NAME}" found in replicated storage.`);
+		}
 
-				const key = this.Client.Keybinds.get(input.KeyCode) || this.Client.Keybinds.get(input.UserInputType);
+		this.link =
+			(ReplicatedStorage.FindFirstChild(LINK_NAME) as RemoteEvent) ??
+			(RunService.IsServer()
+				? (() => {
+						const newRemoteEvent = new Instance("RemoteEvent");
+						newRemoteEvent.Name = LINK_NAME;
+						newRemoteEvent.Parent = ReplicatedStorage;
+						return newRemoteEvent;
+					})()
+				: undefined);
 
-				if (key) {
-					this.Link.FireServer(key);
-					const callback = this.Client.Responses.get(key.lower());
-					if (callback) {
-						callback(player);
-					} else warn(`${key} callback was not found but is a registered bind.`);
-				}
-			});
+		for (const child of actionFolder.GetDescendants()) {
+			if (child.IsA("ModuleScript")) {
+				// eslint-disable-next-line @typescript-eslint/no-require-imports
+				const action = require(child) as ActionType;
 
-			Players.PlayerRemoving.Connect(() => {
-				connection.Disconnect();
-			});
-		},
+				this.createAction(action);
+			}
+		}
+	}
 
-		SetClientBinds: (sentBinds: KEYBINDS_REGISTRY) => {
-			sentBinds.forEach((v, k) => {
-				this.Client.Keybinds.set(k, v.lower());
-			});
-		},
+	createAction(actionData: ActionType) {
+		if (this.actions.has(actionData.Name.lower())) {
+			error(`Skill with name "${actionData.Name}" already exists.`);
+		}
+		this.actions.set(actionData.Name.lower(), actionData);
+	}
 
-		SetClientResponse: (sentReponses: RESPONSE_REGISTRY) => {
-			sentReponses.forEach((v, k) => {
-				this.Client.Responses.set(k.lower(), v);
-			});
-		},
-	};
+	StartClient(player: Player) {
+		this.actions.forEach((action) => {
+			const { Name, Gesture, Client, TouchButton } = action;
+			ContextActionService.BindAction(Name, Client, TouchButton || false, Gesture);
+		});
+	}
 
-	Server = {
-		Responses: new Map() as RESPONSE_REGISTRY,
-		Listen: () => {
-			this.Link.OnServerEvent.Connect((player: Player, key: string | unknown) => {
-				if (typeIs(key, "string")) {
-					const response = this.Server.Responses.get(key.lower());
-					if (response) {
-						response(player);
-					} else warn(`${key} callback was not found but is a registered bind.`);
-				} else warn("server: key is not a string");
-			});
-		},
-
-		SetDefaultBinds: (sentBinds: Map<Enum.KeyCode | Enum.UserInputType, string>) => {
-			sentBinds.forEach((v, k) => {
-				this.Client.Keybinds.set(k, v.lower());
-			});
-		},
-
-		SetServerResponses: (sentReponses: Map<string, (player: Player) => void>) => {
-			sentReponses.forEach((v, k) => {
-				this.Server.Responses.set(k.lower(), v);
-			});
-		},
-	};
+	StartServer(player: Player) {}
 }
 
-export default new SimpleInput();
+const simpleInput = new SimpleAction();
+export = simpleInput;
