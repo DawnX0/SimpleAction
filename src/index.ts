@@ -1,10 +1,12 @@
 import { ContextActionService, ReplicatedStorage, RunService } from "@rbxts/services";
 
-type ActionType = {
+export type ActionType = {
 	Name: string;
 	Gesture: Enum.KeyCode | Enum.UserInputType;
-	Client: () => void;
-	Server: (player: Player) => void;
+	ClientOnStart: (player: Player) => void;
+	ClientOnEnd?: (player: Player) => void;
+	ServerOnStart: (player: Player) => void;
+	ServerOnEnd?: (player: Player) => void;
 	TouchButton?: boolean;
 };
 
@@ -54,14 +56,48 @@ class SimpleAction {
 	}
 
 	StartClient(player: Player) {
+		if (!RunService.IsClient()) error("Must be called from the client!");
+		const link = this.link;
+		if (!link) error("No link event found.");
+
 		this.actions.forEach((action) => {
-			const { Name, Gesture, Client, TouchButton } = action;
-			ContextActionService.BindAction(Name, Client, TouchButton || false, Gesture);
+			const { Name, Gesture, ClientOnStart, ClientOnEnd, TouchButton } = action;
+
+			const ClientWrap = (actionName: string, state: Enum.UserInputState, inputObject: InputObject) => {
+				if (state === Enum.UserInputState.Begin) {
+					ClientOnStart(player);
+					link.FireServer(actionName, false);
+				} else if (state === Enum.UserInputState.End && ClientOnEnd) {
+					ClientOnEnd(player);
+					link.FireServer(actionName, true);
+				}
+			};
+
+			ContextActionService.BindAction(Name, ClientWrap, TouchButton || false, Gesture);
 		});
 	}
 
-	StartServer(player: Player) {}
+	StartServer() {
+		if (!RunService.IsServer()) error("Must be called from the server!");
+		const link = this.link;
+		if (!link) error("No link event found.");
+		this.actions.forEach((action) => {
+			const { Name, ServerOnStart, ServerOnEnd } = action;
+
+			link.OnServerEvent.Connect((player, action, ended) => {
+				if (typeIs(action, "string") && typeIs(ended, "boolean")) {
+					if (Name.lower() === Name.lower()) {
+						if (!ended) {
+							ServerOnStart(player);
+						} else if (ended && ServerOnEnd) {
+							ServerOnEnd(player);
+						}
+					}
+				} else warn(`error occured`);
+			});
+		});
+	}
 }
 
-const simpleInput = new SimpleAction();
-export = simpleInput;
+const simpleAction = new SimpleAction();
+export default simpleAction;
