@@ -1,13 +1,15 @@
-import { ContextActionService, ReplicatedStorage, RunService } from "@rbxts/services";
+import { ContextActionService, ReplicatedStorage, RunService, UserInputService, UserService } from "@rbxts/services";
 
 export type ActionType = {
 	Name: string;
+	InputMethod: "ContextAction" | "UserInput";
 	Gesture: Enum.KeyCode | Enum.UserInputType;
 	ClientOnStart: (player: Player) => void;
 	ClientOnEnd?: (player: Player) => void;
 	ServerOnStart: (player: Player) => void;
 	ServerOnEnd?: (player: Player) => void;
 	TouchButton?: boolean;
+	AdditonalArguments?: { [key: string]: AttributeValue };
 };
 
 const ACTION_FOLDER_NAME = "Actions";
@@ -55,25 +57,71 @@ class SimpleAction {
 		this.actions.set(actionData.Name.lower(), actionData);
 	}
 
+	checkRestrictions(model: Model, actionRestrictions: string[]): boolean {
+		for (const restriction of actionRestrictions) {
+			if (model.GetAttribute(restriction.lower())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	StartClient(player: Player) {
 		if (!RunService.IsClient()) error("Must be called from the client!");
 		const link = this.link;
 		if (!link) error("No link event found.");
 
 		this.actions.forEach((action) => {
-			const { Name, Gesture, ClientOnStart, ClientOnEnd, TouchButton } = action;
+			const { Name, InputMethod, Gesture, ClientOnStart, ClientOnEnd, TouchButton } = action;
 
-			const ClientWrap = (actionName: string, state: Enum.UserInputState, inputObject: InputObject) => {
-				if (state === Enum.UserInputState.Begin) {
+			if (InputMethod === "ContextAction") {
+				// Handle ContextAction input
+				const ClientWrap = (actionName: string, state: Enum.UserInputState, inputObject: InputObject) => {
+					if (state === Enum.UserInputState.Begin) {
+						ClientOnStart(player);
+						link.FireServer(actionName, false);
+					} else if (state === Enum.UserInputState.End && ClientOnEnd) {
+						ClientOnEnd(player);
+						link.FireServer(actionName, true);
+					}
+				};
+
+				// Bind the action to ContextActionService
+				ContextActionService.BindAction(Name, ClientWrap, TouchButton || false, Gesture);
+			}
+		});
+
+		// Connect to UserInputService only once for all UserInput actions
+		UserInputService.InputBegan.Connect((input: InputObject, gameProcessed: boolean) => {
+			if (gameProcessed) return;
+
+			this.actions.forEach((action) => {
+				const { Name, InputMethod, Gesture, ClientOnStart } = action;
+				const isGesture =
+					input.KeyCode.Name.lower() === Gesture.Name.lower() ||
+					input.UserInputType.Name.lower() === Gesture.Name.lower();
+
+				if (InputMethod === "UserInput" && isGesture) {
 					ClientOnStart(player);
-					link.FireServer(actionName, false);
-				} else if (state === Enum.UserInputState.End && ClientOnEnd) {
-					ClientOnEnd(player);
-					link.FireServer(actionName, true);
+					link.FireServer(Name, false);
 				}
-			};
+			});
+		});
 
-			ContextActionService.BindAction(Name, ClientWrap, TouchButton || false, Gesture);
+		UserInputService.InputEnded.Connect((input: InputObject, gameProcessed: boolean) => {
+			if (gameProcessed) return;
+
+			this.actions.forEach((action) => {
+				const { Name, InputMethod, Gesture, ClientOnEnd } = action;
+				const isGesture =
+					input.KeyCode.Name.lower() === Gesture.Name.lower() ||
+					input.UserInputType.Name.lower() === Gesture.Name.lower();
+
+				if (InputMethod === "UserInput" && ClientOnEnd && isGesture) {
+					ClientOnEnd(player);
+					link.FireServer(Name, true);
+				}
+			});
 		});
 	}
 
@@ -81,20 +129,22 @@ class SimpleAction {
 		if (!RunService.IsServer()) error("Must be called from the server!");
 		const link = this.link;
 		if (!link) error("No link event found.");
-		this.actions.forEach((action) => {
-			const { Name, ServerOnStart, ServerOnEnd } = action;
 
-			link.OnServerEvent.Connect((player, action, ended) => {
-				if (typeIs(action, "string") && typeIs(ended, "boolean")) {
-					if (Name.lower() === Name.lower()) {
-						if (!ended) {
-							ServerOnStart(player);
-						} else if (ended && ServerOnEnd) {
-							ServerOnEnd(player);
-						}
+		link.OnServerEvent.Connect((player, actionName, ended) => {
+			if (!typeIs(actionName, "string")) error("actionName must be a string");
+
+			const action = this.actions.get(actionName.lower());
+			if (action) {
+				const { Name, ServerOnStart, ServerOnEnd } = action;
+
+				if (Name.lower() === Name.lower()) {
+					if (!ended) {
+						ServerOnStart(player);
+					} else if (ended && ServerOnEnd) {
+						ServerOnEnd(player);
 					}
-				} else warn(`error occured`);
-			});
+				}
+			}
 		});
 	}
 }
